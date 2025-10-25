@@ -81,10 +81,14 @@ func GetTask(c *gin.Context) {
 
 func UpdateTask(c *gin.Context) {
 	id := c.Param("id")
-	objID, _ := primitive.ObjectIDFromHex(id)
+	objID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ID"})
+		return
+	}
 
 	var task models.Task
-	if err := c.BindJSON(&task); err != nil {
+	if err := c.ShouldBindJSON(&task); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,22 +96,31 @@ func UpdateTask(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	update := bson.M{
-		"$set": bson.M{
-			"title":       task.Title,
-			"description": task.Description,
-			"completed":   task.Completed,
-		},
+	// Build update map dynamically
+	updateFields := bson.M{}
+	if task.Title != "" {
+		updateFields["title"] = task.Title
 	}
+	if task.Description != "" {
+		updateFields["description"] = task.Description
+	}
+	// completed can be false, so we explicitly check using pointer
+	updateFields["completed"] = task.Completed
 
-	_, err := taskCollection.UpdateOne(ctx, bson.M{"_id": objID}, update)
+	update := bson.M{"$set": updateFields}
+
+	result, err := taskCollection.UpdateOne(ctx, bson.M{"_id": objID}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	task.ID = objID
-	c.JSON(http.StatusOK, task)
+	if result.MatchedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task updated successfully"})
 }
 
 func DeleteTask(c *gin.Context) {
