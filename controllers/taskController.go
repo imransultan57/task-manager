@@ -3,9 +3,8 @@ package controllers
 import (
 	"context"
 	"net/http"
-	"time"
-
 	"task-manager/models"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -15,11 +14,13 @@ import (
 
 var taskCollection *mongo.Collection
 
-func InitTaskCollection(c *mongo.Database) {
-	taskCollection = c.Collection("tasks")
+func InitTaskCollection(db *mongo.Database) {
+	taskCollection = db.Collection("tasks")
 }
 
 func CreateTask(c *gin.Context) {
+	userID := c.GetString("userID") // set by JWT middleware
+
 	var task models.Task
 	if err := c.BindJSON(&task); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -27,6 +28,8 @@ func CreateTask(c *gin.Context) {
 	}
 
 	task.ID = primitive.NewObjectID()
+	task.UserID = userID
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -38,15 +41,14 @@ func CreateTask(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, task)
 }
-
-// ... other CRUD functions remain the same ...
-
 func GetTasks(c *gin.Context) {
+	userID := c.GetString("userID") // JWT middleware provides this
+
 	var tasks []models.Task
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cursor, err := taskCollection.Find(ctx, bson.M{})
+	cursor, err := taskCollection.Find(ctx, bson.M{"userId": userID}) // only fetch tasks for this user
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -60,23 +62,6 @@ func GetTasks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tasks)
-}
-
-func GetTask(c *gin.Context) {
-	id := c.Param("id")
-	objID, _ := primitive.ObjectIDFromHex(id)
-
-	var task models.Task
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := taskCollection.FindOne(ctx, bson.M{"_id": objID}).Decode(&task)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, task)
 }
 
 func UpdateTask(c *gin.Context) {

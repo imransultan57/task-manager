@@ -2,12 +2,10 @@ package main
 
 import (
 	"log"
-	"os"
-
+	"net/http"
 	"task-manager/config"
 	"task-manager/controllers"
-	"task-manager/routes"
-
+	"task-manager/middleware"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -16,11 +14,9 @@ import (
 )
 
 func main() {
-	godotenv.Load()
-	config.ConnectDB()
-
-	// Initialize task collection here
-	controllers.InitTaskCollection(config.DB)
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment")
+	}
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
@@ -32,19 +28,43 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Serve static files (CSS, JS)
+	// Serve static files
 	router.Static("/static", "./static")
-
-	// Load HTML templates
 	router.LoadHTMLGlob("templates/*")
 
-	routes.TaskRoutes(router)
+	// Connect to MongoDB
+	db := config.ConnectDB()
+	controllers.InitUserCollection(db)
+	controllers.InitTaskCollection(db)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8090"
+	// Auth routes
+	auth := router.Group("/auth")
+	{
+		auth.POST("/register", controllers.Register)
+		auth.POST("/login", controllers.Login)
 	}
 
-	log.Println("Server running on port", port)
-	router.Run(":" + port)
+	// Serve HTML pages
+	router.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "index.html", nil)
+	})
+	router.GET("/login", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "login.html", nil)
+	})
+	router.GET("/register", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "register.html", nil)
+	})
+
+	// Task routes (protected)
+	taskRoutes := router.Group("/tasks")
+	taskRoutes.Use(middleware.AuthMiddleware())
+	{
+		taskRoutes.GET("", controllers.GetTasks)
+		taskRoutes.POST("", controllers.CreateTask)
+		taskRoutes.PUT("/:id", controllers.UpdateTask)
+		taskRoutes.DELETE("/:id", controllers.DeleteTask)
+	}
+
+	log.Println("Server running at http://localhost:8090")
+	router.Run(":8090")
 }
